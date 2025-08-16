@@ -1,3 +1,4 @@
+import cache from './services/cache';
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -26,6 +27,23 @@ export const createApp = (): Application => {
   app.get('/ready', (_req: Request, res: Response) => {
     res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
   });
+  
+  app.get('/redis-ping', async (req: Request, res: Response) => {
+  try {
+    const pong = await cache.healthCheck(); // this runs Redis PING
+    res.status(200).json({
+      status: 'ok',
+      redis: pong,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'error',
+      message: 'Redis connection failed',
+      error: (err as Error).message,
+    });
+  }
+});
 
   // API routes will be attached later
   app.use(`/api/${config.app.apiVersion}`, apiRoutes);
