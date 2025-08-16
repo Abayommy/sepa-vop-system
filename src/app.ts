@@ -1,60 +1,94 @@
-import cache from './services/cache';
-import express, { Application, Request, Response, NextFunction } from 'express';
+// src/app.ts
+
+import { cache } from './services/cache';
+
+import express, {
+  Application,
+  Request,
+  Response,
+  NextFunction,
+} from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
-import { config } from './config';
-import apiRoutes from './api/routes';
+import rateLimit from 'express-rate-limit';
 
-export const createApp = (): Application => {
-  const app = express();
+// If you have a config module, keep this import. If not, you can remove it.
+import config from './config';
 
-  app.use(helmet());
-  app.use(cors());
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-  app.use(compression());
+const app: Application = express();
 
-  if (config.app.env !== 'test') {
-    app.use(morgan('combined'));
-  }
+/** Core middleware */
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(compression());
+app.use(morgan('combined'));
 
-  app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+/** Basic rate limiter */
+app.use(
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
+
+/** Simple test route (optional) */
+app.get('/test', (_req: Request, res: Response) => {
+  res.status(200).send('ok');
+});
+
+/** Health/ready probes */
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
   });
+});
 
-  app.get('/ready', (_req: Request, res: Response) => {
-    res.status(200).json({ status: 'ready', timestamp: new Date().toISOString() });
+app.get('/ready', (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: 'ready',
+    timestamp: new Date().toISOString(),
   });
-  
-  app.get('/redis-ping', async (req: Request, res: Response) => {
+});
+
+/** Redis connectivity probe */
+app.get('/redis-ping', async (_req: Request, res: Response) => {
   try {
-    const pong = await cache.healthCheck(); // this runs Redis PING
+    const pong = await cache.ping(); // returns "PONG" when OK
     res.status(200).json({
       status: 'ok',
       redis: pong,
       timestamp: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch (err: any) {
     res.status(500).json({
       status: 'error',
       message: 'Redis connection failed',
-      error: (err as Error).message,
+      error: err?.message,
     });
   }
 });
 
-  // API routes will be attached later
-  app.use(`/api/${config.app.apiVersion}`, apiRoutes);
+/** Attach API routes here if/when you have them */
+// import apiRoutes from './api';
+// app.use('/api', apiRoutes);
 
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+/** Error handler (keep last) */
+app.use(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  (err: Error, _req: Request, res: Response, _next: NextFunction) => {
     console.error(err.stack);
     res.status(500).json({
       error: 'Internal Server Error',
-      message: config.app.env === 'development' ? err.message : undefined,
+      message: config?.app?.env === 'development' ? err.message : undefined,
     });
-  });
+  }
+);
 
-  return app;
-};
+export default app;
